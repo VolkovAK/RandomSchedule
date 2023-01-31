@@ -77,7 +77,7 @@ async def print_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         "Команды:\n/time, /random - генерация времени на следующий день\n"
         "/help - печать этой памятки\n"
         "/get_config - получить настройки\n"
-        "/set_config from 09:00 to 13:00 mean 240 sigma 45 - установить настройки"
+            "/set_config from 09:00 to 13:00 mean 11:00 sigma 45 - установить настройки"
     )
     await update.effective_message.reply_text(text=text)
 
