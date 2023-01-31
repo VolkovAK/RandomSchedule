@@ -1,0 +1,11 @@
+version: "3.3"
+
+services:
+  random_schedule:
+    image: random_schedule:latest
+    container_name: random_schedule
+    restart: always
+    environment:
+      PYTHONUNBUFFERED: 1
+      RANDOMSCHEDULE_TG_KEY: xxx
+
