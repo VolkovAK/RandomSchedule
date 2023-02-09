@@ -61,13 +61,13 @@ async def generate_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         rand_time = parse_minutes_to_time(rand_time)
 
         phrase = random.choice(TOMORROW_PHRASES)
-        text = phrase.replace("TIME", f"*{rand_time}*").replace("!", "\!").replace(".", "\.")
+        text = phrase.replace("TIME", f"*{rand_time}*").replace("!", "\!").replace(".", "\.").replace("-", "\-")
         context.bot_data["sent_date"] = current_date
         context.bot_data["sent_time"] = rand_time
     else:
         phrase = random.choice(YOU_STUPID_PHRASES)
         rand_time = context.bot_data["sent_time"]
-        text = phrase.replace("TIME", f"*{rand_time}*").replace("!", "\!").replace(".", "\.")
+        text = phrase.replace("TIME", f"*{rand_time}*").replace("!", "\!").replace(".", "\.").replace("-", "\-")
 
     await update.effective_message.reply_text(text=text, parse_mode=telegram.constants.ParseMode.MARKDOWN_V2)
 
