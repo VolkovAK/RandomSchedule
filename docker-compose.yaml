@@ -5,7 +5,9 @@ services:
     image: random_schedule:latest
     container_name: random_schedule
     restart: always
+    volumes:
+      - ./config.yaml:/app/config.yaml
     environment:
       PYTHONUNBUFFERED: 1
-      RANDOMSCHEDULE_TG_KEY: xxx
+      RANDOMSCHEDULE_TG_KEY: 5785266629:AAGYlw0mPCkR3yTPquSr-6ZNhEH6dISwS7E
 
