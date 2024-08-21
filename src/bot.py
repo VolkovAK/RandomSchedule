@@ -61,6 +61,7 @@ TOMORROW_PHRASES = [
     "TIME - это не просто время, это время перемен!",
     "Завтра в TIME мы начинаем строить будущее!",
     "TIME - это не просто цифры, это наше рабочее кредо!",
+    "Завтра приходить не надо, занятий не будет!",
     "TIME",
     "TIME",
     "TIME",
@@ -79,10 +80,25 @@ TOMORROW_PHRASES = [
     "TIME",
 ]
 
+
+def get_rarity(mean, sigma, result):
+    if mean - sigma < result < mean + sigma:
+        return ""
+    if mean - sigma * 1.6 < result < mean + sigma * 1.6:
+        return "\n\n🟦_Редкое время_🟦"
+    if mean - sigma * 1.9 < result < mean + sigma * 1.9:
+        return "\n\n🟪*Эпичное время*🟪"
+    return "\n\n🟨*_Легендарное время!_*🟨"
+
+
 async def generate_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     current_date = str(datetime.now().date())
     if context.bot_data["sent_date"] != current_date:
-        rand_time = int(random.gauss(context.bot_data["mean"], context.bot_data["sigma"]))
+        sigma = context.bot_data["sigma"]
+        mean = context.bot_data["mean"]
+        rand_time = int(random.gauss(mean, sigma))
+        rarity = get_rarity(mean, sigma, rand_time)
+
         if rand_time < context.bot_data["from"]:
             rand_time = context.bot_data["from"]
         if rand_time > context.bot_data["to"]:
@@ -93,11 +109,13 @@ async def generate_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         text = phrase.replace("TIME", f"*{rand_time}*").replace("!", "\!").replace(".", "\.").replace("-", "\-")
         context.bot_data["sent_date"] = current_date
         context.bot_data["sent_time"] = rand_time
+        text += rarity
     else:
         phrase = random.choice(YOU_STUPID_PHRASES)
         rand_time = context.bot_data["sent_time"]
         text = phrase.replace("TIME", f"*{rand_time}*").replace("!", "\!").replace(".", "\.").replace("-", "\-")
 
+    print(f"{str(datetime.now())} - {update.effective_user.full_name} [{update.effective_user.id}]: {text}")
     await update.effective_message.reply_text(text=text, parse_mode=telegram.constants.ParseMode.MARKDOWN_V2)
 
 
@@ -106,8 +124,17 @@ async def print_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         "Команды:\n/time, /random - генерация времени на следующий день\n"
         "/help - печать этой памятки\n"
         "/get_config - получить настройки\n"
-            "/set_config from 09:00 to 13:00 mean 11:00 sigma 45 - установить настройки"
+        "/set_config from 09:00 to 13:00 mean 11:00 sigma 45 - установить настройки\n"
+        "/reset - сброс времени"
     )
+    await update.effective_message.reply_text(text=text)
+
+async def reset_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    context.bot_data["sent_date"] = "1970-01-01"
+    context.bot_data["sent_time"] = "00:00"
+    text = "Время сброшено."
+    print(f"{str(datetime.now())} - {update.effective_user.full_name} [{update.effective_user.id}]: {text}")
+    
     await update.effective_message.reply_text(text=text)
 
 
@@ -117,7 +144,9 @@ async def get_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         f"до {parse_minutes_to_time(context.bot_data['to'])}, среднее - "
         f"{parse_minutes_to_time(context.bot_data['mean'])}, "
         f"среднеквадратичное отклонение (в минутах) - {context.bot_data['sigma']}."
+        f"\nУстановил {context.bot_data['author']} в {context.bot_data['config_set_time']}"
     )
+    print(f"{str(datetime.now())} - {update.effective_user.full_name} [{update.effective_user.id}]: {text}")
     await update.effective_message.reply_text(text=text)
 
 async def set_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -130,6 +159,8 @@ async def set_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     context.bot_data["to"] = parse_time_to_minutes(_to)
     context.bot_data["mean"] = parse_time_to_minutes(_mean)
     context.bot_data["sigma"] = int(_sigma)
+    context.bot_data["author"] = update.effective_user.full_name
+    context.bot_data["config_set_time"] = str(datetime.now())
     context.bot_data["sent_date"] = "1970-01-01"
     context.bot_data["sent_time"] = "00:00"
 
@@ -138,9 +169,12 @@ async def set_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     cfg["to"] = _to
     cfg["mean"] = _mean
     cfg["sigma"] = _sigma
+    cfg["author"] = update.effective_user.full_name
+    cfg["config_set_time"] = str(datetime.now())
     with open(CONFIG_PATH, "w") as f:
         yaml.safe_dump(cfg, f)
 
+    print(f"{str(datetime.now())} - {update.effective_user.full_name} [{update.effective_user.id}]: {cfg}")
     await update.effective_message.reply_text(text="Параметры установлены.")
 
 def parse_minutes_to_time(minutes: int) -> str:
@@ -158,23 +192,30 @@ class Bot:
         _to = "13:00"
         _mean = "11:00"
         _sigma = "45"
+        _author = "-"
+        _config_set_time = "-"
         if os.path.exists(CONFIG_PATH):
             with open(CONFIG_PATH) as f:
                 cfg = yaml.safe_load(f)
-            _from = cfg["from"]
-            _to = cfg["to"]
-            _mean = cfg["mean"]
-            _sigma = cfg["sigma"]
+            _from = str(cfg["from"])
+            _to = str(cfg["to"])
+            _mean = str(cfg["mean"])
+            _sigma = str(cfg["sigma"])
+            _author = cfg.get("author", "-")
+            _config_set_time = cfg.get("config_set_time", "-")
 
         self.application = Application.builder().token(token).build()
         self.application.add_handler(CommandHandler(["time", "random"], generate_schedule))
         self.application.add_handler(CommandHandler("help", print_help))
         self.application.add_handler(CommandHandler("get_config", get_config))
         self.application.add_handler(CommandHandler("set_config", set_config))
+        self.application.add_handler(CommandHandler("reset", reset_time))
         self.application.bot_data["from"] = parse_time_to_minutes(_from)
         self.application.bot_data["to"] = parse_time_to_minutes(_to)
         self.application.bot_data["mean"] = parse_time_to_minutes(_mean)
         self.application.bot_data["sigma"] = int(_sigma)
+        self.application.bot_data["author"] = _author
+        self.application.bot_data["config_set_time"] = _config_set_time
         self.application.bot_data["sent_date"] = "1970-01-01"
         self.application.bot_data["sent_time"] = "00:00"
         for k, v in self.application.bot_data.items():
