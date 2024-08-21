@@ -88,7 +88,7 @@ def get_rarity(mean, sigma, result):
         return "\n\n🟦_Редкое время_🟦"
     if mean - sigma * 1.9 < result < mean + sigma * 1.9:
         return "\n\n🟪*Эпичное время*🟪"
-    return "\n\n🟨*_Легендарное время!_*🟨"
+    return "\n\n🟨*_Легендарное время\!_*🟨"
 
 
 async def generate_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
