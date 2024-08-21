@@ -5,7 +5,14 @@ services:
     image: random_schedule:latest
     container_name: random_schedule
     restart: always
+    volumes:
+      - ./config.yaml:/app/config.yaml
     environment:
       PYTHONUNBUFFERED: 1
-      RANDOMSCHEDULE_TG_KEY: xxx
+    secrets:
+      - tg_key
+
+secrets:
+  tg_key:
+    file: ./tg.key  # file with your bot tg key
 

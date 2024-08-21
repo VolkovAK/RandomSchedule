@@ -1,10 +1,10 @@
-import os
 from bot import Bot
 
 def main():
-    token = os.getenv("RANDOMSCHEDULE_TG_KEY")
-    if token is None:
-        print("RANDOMSCHEDULE_TG_KEY is not set!")
+    with open("/run/secrets/tg_key") as f:
+        token = f.read().strip()
+    if token == "":
+        print("tg_key is not set!")
         return
 
     print("Nu che narod, pognali?")
