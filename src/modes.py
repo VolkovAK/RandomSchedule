@@ -14,7 +14,7 @@ from phrases import (
     TOMORROW_PHRASES,
     YOU_STUPID_PHRASES,
 )
-from utils import apply_phrase, bold_md, get_rarity, parse_minutes_to_time
+from utils import apply_phrase, bold_md, escape_md, get_rarity, parse_minutes_to_time
 
 
 def roll_bet_multiplier() -> int:
@@ -153,6 +153,22 @@ def compute_king_deadline(now: datetime, countdown_min: int, from_minutes: int) 
     from_h, from_m = divmod(from_minutes, 60)
     earliest = now.replace(hour=from_h, minute=from_m, second=0, microsecond=0)
     return max(raw, earliest)
+
+
+def solo_missed_checkin_for_debuff(state: dict, current_date: str) -> Optional[str]:
+    if state.get("schedule_kind") != "solo" or not state.get("solo_player"):
+        return None
+    if state.get("solo_checkin"):
+        return None
+    target = state.get("target_date")
+    if not target or target >= current_date:
+        return None
+    return state["solo_player"]
+
+
+def format_expulsion_debuff_suffix(nickname: str) -> str:
+    nick = nickname if nickname.startswith("@") else f"@{nickname}"
+    return f"\n\n{escape_md(nick + ' - на полчаса раньше!')}"
 
 
 def get_solo_checkin_deadline(state: dict) -> Optional[datetime]:

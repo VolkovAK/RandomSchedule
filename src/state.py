@@ -32,6 +32,7 @@ DEFAULT_DAILY_STATE = {
     "solo_player": None,
     "solo_checkin": False,
     "insurance_holder": None,
+    "expulsion_debuff": None,
 }
 
 
@@ -73,11 +74,16 @@ def update_daily_state(bot_data: dict, **kwargs) -> dict:
 
 def reset_daily_state(bot_data: dict, keep_insurance: bool = True) -> None:
     holder = None
+    debuff = None
     if keep_insurance:
-        holder = get_daily_state(bot_data).get("insurance_holder")
+        prev = get_daily_state(bot_data)
+        holder = prev.get("insurance_holder")
+        debuff = prev.get("expulsion_debuff")
     state = deepcopy(DEFAULT_DAILY_STATE)
     if keep_insurance and holder:
         state["insurance_holder"] = holder
+    if keep_insurance and debuff:
+        state["expulsion_debuff"] = debuff
     save_daily_state(state)
     sync_state_to_bot_data(bot_data, state)
 
@@ -88,6 +94,14 @@ def set_insurance_holder(bot_data: dict, nickname: str) -> None:
 
 def clear_insurance(bot_data: dict) -> None:
     update_daily_state(bot_data, insurance_holder=None)
+
+
+def set_expulsion_debuff(bot_data: dict, nickname: str) -> None:
+    update_daily_state(bot_data, expulsion_debuff=nickname)
+
+
+def clear_expulsion_debuff(bot_data: dict) -> None:
+    update_daily_state(bot_data, expulsion_debuff=None)
 
 
 def cancel_named_jobs(job_queue, names: list[str]) -> None:

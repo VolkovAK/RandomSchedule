@@ -15,9 +15,11 @@ from modes import (
     build_solo_announcement_text,
     compute_king_deadline,
     format_bet_suffix,
+    format_expulsion_debuff_suffix,
     generate_password,
     get_solo_checkin_deadline,
     nickname_matches,
+    solo_missed_checkin_for_debuff,
     roll_bet_multiplier,
     roll_exact_time_minutes,
     roll_fog_reveal_minutes,
@@ -44,10 +46,12 @@ from phrases import (
 )
 from state import (
     cancel_named_jobs,
+    clear_expulsion_debuff,
     clear_insurance,
     get_daily_state,
     load_daily_state,
     reset_daily_state,
+    set_expulsion_debuff,
     set_insurance_holder,
     update_daily_state,
 )
@@ -86,6 +90,10 @@ def _roll_daily_schedule(
     is_solo = solo_player is not None
 
     if not is_repeat:
+        missed = solo_missed_checkin_for_debuff(state, current_date)
+        if missed:
+            set_expulsion_debuff(bot_data, missed)
+
         mode = "normal" if is_solo else roll_mode(bot_data)
         exact_minutes = roll_exact_time_minutes(bot_data)
         exact_time = parse_minutes_to_time(exact_minutes)
@@ -198,6 +206,9 @@ def _roll_daily_schedule(
 
     if not player:
         text += format_bet_suffix(bet_multiplier)
+        debuff_player = get_daily_state(bot_data).get("expulsion_debuff")
+        if mode == "normal" and debuff_player:
+            text += format_expulsion_debuff_suffix(debuff_player)
     return state, text, bet_multiplier
 
 
@@ -264,8 +275,10 @@ async def checkin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     now = datetime.now()
     if now > deadline:
+        set_expulsion_debuff(bot_data, player)
         phrase = random.choice(CHECKIN_LATE_PHRASES)
         await send_md(update, apply_phrase(phrase, {"PLAYER": player_bold}))
+        print(f"{datetime.now()} - checkin late {player}, expulsion debuff")
         return
 
     set_insurance_holder(bot_data, player)
@@ -304,6 +317,22 @@ async def save_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     await send_md(update, apply_phrase(phrase, {"HOLDER": holder_bold}))
     print(f"{datetime.now()} - save by {holder}, success={success}")
+
+
+async def restore_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    state = get_daily_state(context.bot_data)
+    if not state.get("expulsion_debuff"):
+        await update.effective_message.reply_text(
+            text="Дебаффа «под отчисление» нет."
+        )
+        return
+
+    player = state["expulsion_debuff"]
+    clear_expulsion_debuff(context.bot_data)
+    await update.effective_message.reply_text(
+        text=f"Дебафф «под отчисление» снят с {player}."
+    )
+    print(f"{datetime.now()} - restore expulsion debuff for {player}")
 
 
 async def duel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -507,11 +536,16 @@ HELP_TEXT = """ОБЪЯВЛЕНИЕ В ДЕКАНАТЕ
 ━━━ /checkin ━━━
 ТОЛЬКО после /solo. Без /solo Декан /checkin не принимает.
 В день дедлайна, вовремя → страховка игроку из /solo.
+Опоздал или не отметился → дебафф «под отчисление»: при следующем
+обычном /time в конце: «@ник - на полчаса раньше!».
+
+━━━ /restore ━━━
+Единственный способ снять дебафф «под отчисление».
 
 ━━━ СТРАХОВКА ━━━
 • Одна на всех — владелец в /get_config
 • Новый соло-чемпион забирает у прежнего
-• /save — только владелец, 50% отменить проигрыш
+• /save — только владелец, 50% отменить проигрыш; только в обычном режиме дня
 • После /save страховка сгорает
 
 ━━━ /duel <имя1> <имя2> ━━━
@@ -547,6 +581,7 @@ async def get_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     bd = context.bot_data
     state = get_daily_state(bd)
     holder = state.get("insurance_holder") or "нет"
+    debuff = state.get("expulsion_debuff") or "нет"
     text = (
         f"Генерация от {parse_minutes_to_time(bd['from'])} "
         f"до {parse_minutes_to_time(bd['to'])}, среднее — "
@@ -557,6 +592,7 @@ async def get_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         f"Обычный: {int((1 - bd.get('mode_fog_chance', 0.3) - bd.get('mode_king_chance', 0.2)) * 100)}%, "
         f"king countdown {bd.get('king_countdown_min')}-{bd.get('king_countdown_max')} мин.\n"
         f"Страховка: {holder}\n"
+        f"Под отчисление: {debuff}\n"
         f"Установил {bd['author']} в {bd['config_set_time']}"
     )
     print(f"{datetime.now()} - {update.effective_user.full_name} [{update.effective_user.id}]: {text}")
@@ -649,6 +685,7 @@ class Bot:
         self.application.add_handler(CommandHandler("solo", solo_command))
         self.application.add_handler(CommandHandler("checkin", checkin_command))
         self.application.add_handler(CommandHandler("save", save_command))
+        self.application.add_handler(CommandHandler("restore", restore_command))
         self.application.add_handler(CommandHandler("duel", duel_command))
         self.application.add_handler(CommandHandler("king", king_command))
         self.application.add_handler(
