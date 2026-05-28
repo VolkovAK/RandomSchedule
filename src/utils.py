@@ -30,8 +30,15 @@ def get_rarity(mean: int, sigma: int, result: int) -> str:
     return "\n\n🟨*_Легендарное время\\!_*🟨"
 
 
+def mode_chance_percents(bot_data: dict) -> tuple[int, int, int]:
+    fog = round(bot_data.get("mode_fog_chance", 0.30) * 100)
+    king = round(bot_data.get("mode_king_chance", 0.20) * 100)
+    normal = 100 - fog - king
+    return fog, king, normal
+
+
 def apply_phrase(phrase: str, replacements: dict[str, str]) -> str:
-    text = phrase
+    text = escape_md(phrase)
     for key, value in replacements.items():
         text = text.replace(key, value)
-    return escape_md(text)
+    return text

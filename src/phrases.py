@@ -340,7 +340,7 @@ SOLO_ANNOUNCE_PHRASES = [
     "PLAYER! Завтра TIME. Декан одобрит /checkin.",
     "PLAYER, завтра TIME — докажи /checkin.",
     "Соло для PLAYER: TIME. /checkin!",
-    "PLAYER vs TIME: TIME. /checkin до дедлайна.",
+    "PLAYER vs дедлайн: TIME. /checkin до дедлайна.",
     "PLAYER, TIME. Страховка — за честный /checkin.",
 ]
 
@@ -426,12 +426,49 @@ CHECKIN_ALREADY_PHRASES = [
     "PLAYER уже отметился.",
 ]
 
+MODE_LOCKED_PHRASES = [
+    "Сегодня уже выбран ACTIVE. REQUESTED сегодня не приму.",
+    "Декан уже объявил ACTIVE. REQUESTED — завтра.",
+    "Один режим в день: ACTIVE уже есть. REQUESTED отклонён.",
+    "ACTIVE на сегодня зафиксирован. REQUESTED не принимается.",
+    "Сначала закройте день с ACTIVE. REQUESTED подождёт.",
+    "ACTIVE объявлен. REQUESTED в этот день не к чему.",
+    "Деканат: ACTIVE. REQUESTED — нет.",
+    "Уже ACTIVE. REQUESTED не объявлю.",
+    "ACTIVE выбран. REQUESTED отклоняю.",
+    "На сегодня ACTIVE. REQUESTED не приму.",
+]
+
+MODE_LOCKED_SOLO_OTHER_PHRASES = [
+    "Соло уже для PLAYER. Чужой /solo не приму.",
+    "PLAYER уже в соло. Ваш /solo сегодня не к чему.",
+    "Декан вызвал PLAYER. Другому /solo не положен.",
+    "Соло занято PLAYER. Чужой /solo отклонён.",
+    "PLAYER в соло. Ваш /solo подождёт до завтра.",
+]
+
+MODE_LOCKED_DUEL_OTHER_PHRASES = [
+    "Дуэль PLAYER1 vs PLAYER2 уже объявлена. Другую сегодня не приму.",
+    "Сегодня PLAYER1 против PLAYER2. Новую дуэль не объявлю.",
+    "Декан уже назначил PLAYER1 vs PLAYER2. Иная дуэль — нет.",
+    "Дуэль PLAYER1 и PLAYER2 идёт. Других соперников сегодня не жду.",
+    "PLAYER1 vs PLAYER2 зафиксировано. Другую дуэль не приму.",
+]
+
+CHECKIN_NOT_OWNER_PHRASES = [
+    "/checkin только для PLAYER. Вы не в соло.",
+    "Соло вызвал PLAYER. Чужой /checkin не принимаю.",
+    "PLAYER отмечается сам. Ваш /checkin не к чему.",
+    "Декан ждёт /checkin от PLAYER, не от вас.",
+    "Это соло PLAYER. Ваш /checkin отклонён.",
+]
+
 CHECKIN_NOT_SOLO_PHRASES = [
     "/checkin только после /solo. Сначала вызовите одного.",
-    "Я принимаю /checkin лишь в соло. Нужен /solo <ник>.",
+    "Я принимаю /checkin лишь в соло. Нужен /solo.",
     "Декан не отмечает /checkin без соло. Сначала /solo.",
     "Без /solo я вас не вызывал персонально — /checkin не к чему.",
-    "Сначала /solo <ник>. Потом, в день дедлайна, /checkin.",
+    "Сначала /solo. Потом, в день дедлайна, /checkin.",
     "Это не соло. /checkin не действует.",
     "Вызовите студента через /solo — тогда поговорим о /checkin.",
     "/checkin только для персонального вызова (/solo).",

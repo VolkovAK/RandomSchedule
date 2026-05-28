@@ -104,6 +104,20 @@ def clear_expulsion_debuff(bot_data: dict) -> None:
     update_daily_state(bot_data, expulsion_debuff=None)
 
 
+def get_today_activity(state: dict, current_date: str) -> str | None:
+    if state.get("sent_date") == current_date:
+        if state.get("schedule_kind") == "solo" and state.get("solo_player"):
+            return "solo"
+        return "time"
+    if (
+        state.get("duel_date") == current_date
+        and state.get("duel_player1")
+        and state.get("duel_player2")
+    ):
+        return "duel"
+    return None
+
+
 def cancel_named_jobs(job_queue, names: list[str]) -> None:
     if job_queue is None:
         return

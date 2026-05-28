@@ -19,6 +19,7 @@ from modes import (
     generate_password,
     get_solo_checkin_deadline,
     nickname_matches,
+    resolve_user_nickname,
     solo_missed_checkin_for_debuff,
     roll_bet_multiplier,
     roll_exact_time_minutes,
@@ -31,6 +32,7 @@ from phrases import (
     CHECKIN_ALREADY_PHRASES,
     CHECKIN_KING_NOT_STARTED_PHRASES,
     CHECKIN_LATE_PHRASES,
+    CHECKIN_NOT_OWNER_PHRASES,
     CHECKIN_NOT_SOLO_PHRASES,
     CHECKIN_SUCCESS_PHRASES,
     DUEL_PHRASES,
@@ -39,6 +41,9 @@ from phrases import (
     KING_MEDIA_TIMEOUT_PHRASES,
     KING_PASSWORD_PHRASES,
     KING_START_PHRASES,
+    MODE_LOCKED_DUEL_OTHER_PHRASES,
+    MODE_LOCKED_PHRASES,
+    MODE_LOCKED_SOLO_OTHER_PHRASES,
     SAVE_FAIL_PHRASES,
     SAVE_NO_INSURANCE_PHRASES,
     SAVE_NOT_OWNER_PHRASES,
@@ -49,13 +54,20 @@ from state import (
     clear_expulsion_debuff,
     clear_insurance,
     get_daily_state,
+    get_today_activity,
     load_daily_state,
     reset_daily_state,
     set_expulsion_debuff,
     set_insurance_holder,
     update_daily_state,
 )
-from utils import apply_phrase, bold_md, parse_minutes_to_time, parse_time_to_minutes
+from utils import (
+    apply_phrase,
+    bold_md,
+    mode_chance_percents,
+    parse_minutes_to_time,
+    parse_time_to_minutes,
+)
 
 CONFIG_PATH = "config.yaml"
 
@@ -69,11 +81,31 @@ DEFAULT_MODE_CONFIG = {
     "fog_sigma_max": 25,
 }
 
+ACTIVITY_LABELS = {
+    "time": "/time",
+    "solo": "/solo",
+    "duel": "/duel",
+}
+
 
 async def send_md(update: Update, text: str) -> None:
     await update.effective_message.reply_text(
         text=text,
         parse_mode=telegram.constants.ParseMode.MARKDOWN_V2,
+    )
+
+
+async def send_mode_locked(update: Update, active: str, requested: str) -> None:
+    phrase = random.choice(MODE_LOCKED_PHRASES)
+    await send_md(
+        update,
+        apply_phrase(
+            phrase,
+            {
+                "ACTIVE": bold_md(ACTIVITY_LABELS.get(active, active)),
+                "REQUESTED": bold_md(ACTIVITY_LABELS.get(requested, requested)),
+            },
+        ),
     )
 
 
@@ -144,35 +176,6 @@ def _roll_daily_schedule(
 
         if mode == "fog":
             schedule_fog_reveal(job_queue, state)
-    else:
-        if solo_player is None and state.get("schedule_kind") == "solo":
-            update_daily_state(
-                bot_data,
-                schedule_kind="group",
-                solo_player=None,
-            )
-            state = get_daily_state(bot_data)
-        elif solo_player:
-            cancel_named_jobs(job_queue, ["fog_reveal", "king_deadline"])
-            update_daily_state(
-                bot_data,
-                schedule_kind="solo",
-                solo_player=solo_player,
-                solo_checkin=False,
-                mode="normal",
-                display_time=state["exact_time"],
-                bet_multiplier=1,
-                king_started=False,
-                king_deadline_iso=None,
-                king_winner=None,
-                pending_king_user_id=None,
-                pending_king_until_iso=None,
-                pending_king_password=None,
-                revealed=True,
-                fog_sigma=0,
-                display_delta=0,
-            )
-            state = get_daily_state(bot_data)
 
     mode = state["mode"]
     exact_time = state["exact_time"]
@@ -213,6 +216,13 @@ def _roll_daily_schedule(
 
 
 async def generate_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    current_date = str(datetime.now().date())
+    state = get_daily_state(context.bot_data)
+    activity = get_today_activity(state, current_date)
+    if activity in ("solo", "duel"):
+        await send_mode_locked(update, activity, "time")
+        return
+
     _, text, _ = _roll_daily_schedule(
         context.bot_data,
         update.effective_chat.id,
@@ -224,11 +234,32 @@ async def generate_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def solo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not context.args:
-        await update.effective_message.reply_text(text="Использование: /solo <ник>")
+    user = update.effective_user
+    nickname = resolve_user_nickname(user)
+    if not nickname:
+        await update.effective_message.reply_text(
+            text="Укажите @username в Telegram или задайте имя в профиле."
+        )
         return
 
-    nickname = context.args[0]
+    current_date = str(datetime.now().date())
+    state = get_daily_state(context.bot_data)
+    activity = get_today_activity(state, current_date)
+
+    if activity == "time":
+        await send_mode_locked(update, activity, "solo")
+        return
+    if activity == "duel":
+        await send_mode_locked(update, activity, "solo")
+        return
+    if activity == "solo" and not nickname_matches(user, state["solo_player"]):
+        phrase = random.choice(MODE_LOCKED_SOLO_OTHER_PHRASES)
+        await send_md(
+            update,
+            apply_phrase(phrase, {"PLAYER": bold_md(state["solo_player"])}),
+        )
+        return
+
     _, text, _ = _roll_daily_schedule(
         context.bot_data,
         update.effective_chat.id,
@@ -257,6 +288,11 @@ async def checkin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     player = state["solo_player"]
     player_bold = bold_md(player)
+
+    if not nickname_matches(update.effective_user, player):
+        phrase = random.choice(CHECKIN_NOT_OWNER_PHRASES)
+        await send_md(update, apply_phrase(phrase, {"PLAYER": player_bold}))
+        return
 
     if state.get("solo_checkin"):
         phrase = random.choice(CHECKIN_ALREADY_PHRASES)
@@ -348,11 +384,30 @@ async def duel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     bot_data = context.bot_data
 
     state = get_daily_state(bot_data)
+    activity = get_today_activity(state, current_date)
     is_repeat = (
-        state.get("duel_date") == current_date
+        activity == "duel"
         and state.get("duel_player1") == player1
         and state.get("duel_player2") == player2
     )
+
+    if activity in ("time", "solo"):
+        await send_mode_locked(update, activity, "duel")
+        return
+
+    if activity == "duel" and not is_repeat:
+        phrase = random.choice(MODE_LOCKED_DUEL_OTHER_PHRASES)
+        await send_md(
+            update,
+            apply_phrase(
+                phrase,
+                {
+                    "PLAYER1": bold_md(state["duel_player1"]),
+                    "PLAYER2": bold_md(state["duel_player2"]),
+                },
+            ),
+        )
+        return
 
     if is_repeat:
         phrase = random.choice(DUEL_REPEAT_PHRASES)
@@ -501,15 +556,18 @@ async def king_media_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 HELP_TEXT = """ОБЪЯВЛЕНИЕ В ДЕКАНАТЕ
 
+━━━ Один режим в день ━━━
+За день можно выбрать только одно: /time, /solo или /duel.
+Повтор той же команды в тот же день — Декан повторит уже сказанное.
+
 ━━━ /time и /random ━━━
-Раз в день Декан объявляет правила на ЗАВТРА.
-Повтор в тот же день — Декан повторит уже сказанное.
+Декан объявляет правила на ЗАВТРА.
 
 При первом вызове крутится режим + ставка (см. ниже).
 
 РЕЖИМЫ ДНЯ:
 
-▸ Обычный (остаток вероятности)
+▸ Обычный (50% при дефолте в /get_config)
   Декан называет точное время прихода.
   Явиться к этому часу. Позже — опоздание.
 
@@ -529,12 +587,12 @@ HELP_TEXT = """ОБЪЯВЛЕНИЕ В ДЕКАНАТЕ
 СТАВКА (только /time):
 80% ×1 | 15% ×2 | 5% ×3
 
-━━━ /solo <ник> ━━━
-Декан вызывает одного — только точное время, без тумана, царя и ставки.
-Повторный /time в тот же день отменяет соло.
+━━━ /solo ━━━
+Декан вызывает вас (ник из профиля Telegram) — только точное время,
+без тумана войны, царя горы и ставки.
 
 ━━━ /checkin ━━━
-ТОЛЬКО после /solo. Без /solo Декан /checkin не принимает.
+ТОЛЬКО после /solo, только автор соло. Без /solo Декан /checkin не принимает.
 В день дедлайна, вовремя → страховка игроку из /solo.
 Опоздал или не отметился → дебафф «под отчисление»: при следующем
 обычном /time в конце: «@ник - на полчаса раньше!».
@@ -582,15 +640,14 @@ async def get_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     state = get_daily_state(bd)
     holder = state.get("insurance_holder") or "нет"
     debuff = state.get("expulsion_debuff") or "нет"
+    fog_pct, king_pct, normal_pct = mode_chance_percents(bd)
     text = (
         f"Генерация от {parse_minutes_to_time(bd['from'])} "
         f"до {parse_minutes_to_time(bd['to'])}, среднее — "
         f"{parse_minutes_to_time(bd['mean'])}, σ — {bd['sigma']} мин.\n"
-        f"Туман: {int(bd.get('mode_fog_chance', 0.3) * 100)}%, "
-        f"σ тумана {bd.get('fog_sigma_min')}-{bd.get('fog_sigma_max')} мин, "
-        f"Царь: {int(bd.get('mode_king_chance', 0.2) * 100)}%, "
-        f"Обычный: {int((1 - bd.get('mode_fog_chance', 0.3) - bd.get('mode_king_chance', 0.2)) * 100)}%, "
-        f"king countdown {bd.get('king_countdown_min')}-{bd.get('king_countdown_max')} мин.\n"
+        f"Туман войны: {fog_pct}%, σ тумана {bd.get('fog_sigma_min')}-{bd.get('fog_sigma_max')} мин, "
+        f"Царь горы: {king_pct}%, Обычный: {normal_pct}%, "
+        f"отсчёт царя горы {bd.get('king_countdown_min')}-{bd.get('king_countdown_max')} мин.\n"
         f"Страховка: {holder}\n"
         f"Под отчисление: {debuff}\n"
         f"Установил {bd['author']} в {bd['config_set_time']}"

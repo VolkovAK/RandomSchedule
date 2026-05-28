@@ -189,6 +189,16 @@ def get_solo_checkin_deadline(state: dict) -> Optional[datetime]:
     return datetime.combine(day, datetime.min.time()).replace(hour=hours, minute=minutes)
 
 
+def resolve_user_nickname(user) -> Optional[str]:
+    if user.username:
+        return f"@{user.username}"
+    if user.first_name:
+        return user.first_name
+    if user.full_name:
+        return user.full_name
+    return None
+
+
 def nickname_matches(user, nickname: str, extra_arg: Optional[str] = None) -> bool:
     nick = nickname.lower().lstrip("@")
     if extra_arg and extra_arg.lower().lstrip("@") == nick:
