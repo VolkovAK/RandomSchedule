@@ -20,6 +20,8 @@ from modes import (
     nickname_matches,
     roll_bet_multiplier,
     roll_exact_time_minutes,
+    roll_fog_reveal_minutes,
+    roll_fog_sigma,
     roll_mode,
     target_date_from,
 )
@@ -54,12 +56,13 @@ from utils import apply_phrase, bold_md, parse_minutes_to_time, parse_time_to_mi
 CONFIG_PATH = "config.yaml"
 
 DEFAULT_MODE_CONFIG = {
-    "mode_fog_chance": 0.10,
-    "mode_king_chance": 0.05,
+    "mode_fog_chance": 0.30,
+    "mode_king_chance": 0.20,
     "king_countdown_min": 5,
     "king_countdown_max": 30,
     "king_media_timeout_sec": 180,
     "fog_sigma_min": 10,
+    "fog_sigma_max": 25,
 }
 
 
@@ -80,24 +83,28 @@ def _roll_daily_schedule(
     state = get_daily_state(bot_data)
     is_repeat = state["sent_date"] == current_date
 
+    is_solo = solo_player is not None
+
     if not is_repeat:
-        mode = roll_mode(bot_data)
+        mode = "normal" if is_solo else roll_mode(bot_data)
         exact_minutes = roll_exact_time_minutes(bot_data)
         exact_time = parse_minutes_to_time(exact_minutes)
-        bet_multiplier = roll_bet_multiplier()
+        bet_multiplier = 1 if is_solo else roll_bet_multiplier()
         target_date = target_date_from(current_date)
 
         fog_sigma = 0
         display_delta = 0
         display_time = exact_time
 
+        fog_center_minutes = exact_minutes
+        fog_center = exact_time
+
         if mode == "fog":
-            fog_sigma = random.randint(
-                bot_data.get("fog_sigma_min", 10),
-                bot_data["sigma"],
-            )
+            fog_sigma = roll_fog_sigma(bot_data)
             display_delta = 2 * fog_sigma
-            display_time = build_fog_display(exact_minutes, display_delta)
+            exact_minutes = roll_fog_reveal_minutes(fog_center_minutes, fog_sigma, bot_data)
+            exact_time = parse_minutes_to_time(exact_minutes)
+            display_time = build_fog_display(fog_center_minutes, display_delta)
 
         cancel_named_jobs(job_queue, ["fog_reveal", "king_deadline"])
 
@@ -112,6 +119,8 @@ def _roll_daily_schedule(
             bet_multiplier=bet_multiplier,
             chat_id=chat_id,
             fog_sigma=fog_sigma,
+            fog_center_minutes=fog_center_minutes,
+            fog_center=fog_center,
             display_delta=display_delta,
             revealed=False,
             king_started=False,
@@ -128,12 +137,32 @@ def _roll_daily_schedule(
         if mode == "fog":
             schedule_fog_reveal(job_queue, state)
     else:
-        if solo_player and state.get("schedule_kind") != "solo":
+        if solo_player is None and state.get("schedule_kind") == "solo":
+            update_daily_state(
+                bot_data,
+                schedule_kind="group",
+                solo_player=None,
+            )
+            state = get_daily_state(bot_data)
+        elif solo_player:
+            cancel_named_jobs(job_queue, ["fog_reveal", "king_deadline"])
             update_daily_state(
                 bot_data,
                 schedule_kind="solo",
                 solo_player=solo_player,
                 solo_checkin=False,
+                mode="normal",
+                display_time=state["exact_time"],
+                bet_multiplier=1,
+                king_started=False,
+                king_deadline_iso=None,
+                king_winner=None,
+                pending_king_user_id=None,
+                pending_king_until_iso=None,
+                pending_king_password=None,
+                revealed=True,
+                fog_sigma=0,
+                display_delta=0,
             )
             state = get_daily_state(bot_data)
 
@@ -148,14 +177,11 @@ def _roll_daily_schedule(
     if player:
         text = build_solo_announcement_text(
             solo_player=player,
-            mode=mode,
             exact_time=exact_time,
-            display_time=display_time,
             is_repeat=is_repeat,
             mean=bot_data["mean"],
             sigma=bot_data["sigma"],
             exact_minutes=exact_minutes,
-            display_delta=state.get("display_delta", 0),
         )
     else:
         text = build_announcement_text(
@@ -167,9 +193,11 @@ def _roll_daily_schedule(
             sigma=bot_data["sigma"],
             exact_minutes=exact_minutes,
             display_delta=state.get("display_delta", 0),
+            fog_center_time=state.get("fog_center"),
         )
 
-    text += format_bet_suffix(bet_multiplier)
+    if not player:
+        text += format_bet_suffix(bet_multiplier)
     return state, text, bet_multiplier
 
 
@@ -212,7 +240,7 @@ async def checkin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     if state["target_date"] != today:
         await update.effective_message.reply_text(
-            text="Сегодня не день соло. /checkin в день дедлайна."
+            text="/checkin — в день, когда вызывал (/solo). Сегодня не тот день."
         )
         return
 
@@ -231,7 +259,7 @@ async def checkin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     deadline = get_solo_checkin_deadline(state)
     if deadline is None:
-        await update.effective_message.reply_text(text="Дедлайн ещё не определён.")
+        await update.effective_message.reply_text(text="Дедлайн ещё не назначен.")
         return
 
     now = datetime.now()
@@ -326,12 +354,12 @@ async def king_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     today = str(datetime.now().date())
 
     if state["mode"] != "king":
-        await update.effective_message.reply_text(text="Сегодня не режим царя горы.")
+        await update.effective_message.reply_text(text="Сегодня не царь горы. Сначала /time.")
         return
 
     if state["target_date"] != today:
         await update.effective_message.reply_text(
-            text="Царь горы объявлен на другой день. Сначала /time."
+            text="Царь горы — на другой день. Ждите вызова."
         )
         return
 
@@ -343,7 +371,7 @@ async def king_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if state.get("pending_king_user_id") is not None:
         until_iso = state.get("pending_king_until_iso")
         if until_iso and datetime.fromisoformat(until_iso) > datetime.now():
-            await update.effective_message.reply_text(text="Кто-то уже вызвал /king. Ждите.")
+            await update.effective_message.reply_text(text="/king уже у другого. Ждите.")
             return
 
     password = generate_password()
@@ -442,21 +470,66 @@ async def king_media_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await send_md(update, text)
 
 
+HELP_TEXT = """ОБЪЯВЛЕНИЕ В ДЕКАНАТЕ
+
+━━━ /time и /random ━━━
+Раз в день Декан объявляет правила на ЗАВТРА.
+Повтор в тот же день — Декан повторит уже сказанное.
+
+При первом вызове крутится режим + ставка (см. ниже).
+
+РЕЖИМЫ ДНЯ:
+
+▸ Обычный (остаток вероятности)
+  Декан называет точное время прихода.
+  Явиться к этому часу. Позже — опоздание.
+
+▸ Туман войны (шанс в /get_config, по умолчанию 30%)
+  Декан даёт ориентир: ~центр ± 2σ тумана (σ своя, из config).
+  Фактическое время — gauss(центр, σ).
+  Обрезка только по from/to. Декан сам назовёт точное время.
+  Опоздание — с его сообщения.
+
+▸ Царь горы (шанс в /get_config, по умолчанию 20%)
+  Точного времени заранее нет.
+  Первый в аудитории пишет /king — Декан выдаёт пароль.
+  Фото с паролем или кружок (~3 мин).
+  Отсчёт 5–30 мин, дедлайн не раньше 9:00 (from в конфиге).
+  Декан объявит конец ожидания — опоздание после этого.
+
+СТАВКА (только /time):
+80% ×1 | 15% ×2 | 5% ×3
+
+━━━ /solo <ник> ━━━
+Декан вызывает одного — только точное время, без тумана, царя и ставки.
+Повторный /time в тот же день отменяет соло.
+
+━━━ /checkin ━━━
+ТОЛЬКО после /solo. Без /solo Декан /checkin не принимает.
+В день дедлайна, вовремя → страховка игроку из /solo.
+
+━━━ СТРАХОВКА ━━━
+• Одна на всех — владелец в /get_config
+• Новый соло-чемпион забирает у прежнего
+• /save — только владелец, 50% отменить проигрыш
+• После /save страховка сгорает
+
+━━━ /duel <имя1> <имя2> ━━━
+Декан объявляет дуэль. Кто раньше на месте — победил.
+
+━━━ /king ━━━
+Только «царь горы», только в день дедлайна.
+См. блок выше.
+
+━━━ Служебное ━━━
+/get_config — настройки + страховка
+/set_config from 09:00 to 13:00 mean 11:00 sigma 45
+/reset — сброс расписания (страховка остаётся)
+/help — эта памятка"""
+
+
 async def print_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    text = (
-        "Команды:\n"
-        "/time, /random — время на завтра (normal / туман / царь горы)\n"
-        "/solo <ник> — как /time, но для одного; вовремя + /checkin = страховка\n"
-        "/checkin — отметка в соло-режиме до дедлайна (страховка одному)\n"
-        "/save — 50% отменить проигрыш (только владелец страховки, сгорает)\n"
-        "/duel <имя1> <имя2> — дуэль: кто раньше — победил\n"
-        "/king — царь горы: /king + фото или кружок\n"
-        "/help — эта памятка\n"
-        "/get_config — настройки и владелец страховки\n"
-        "/set_config from 09:00 to 13:00 mean 11:00 sigma 45\n"
-        "/reset — сброс расписания (страховка сохраняется)"
-    )
-    await update.effective_message.reply_text(text=text)
+    await update.effective_message.reply_text(text=HELP_TEXT)
 
 
 async def reset_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -478,8 +551,10 @@ async def get_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         f"Генерация от {parse_minutes_to_time(bd['from'])} "
         f"до {parse_minutes_to_time(bd['to'])}, среднее — "
         f"{parse_minutes_to_time(bd['mean'])}, σ — {bd['sigma']} мин.\n"
-        f"Туман: {bd.get('mode_fog_chance', 0.1)}, "
-        f"Царь: {bd.get('mode_king_chance', 0.05)}, "
+        f"Туман: {int(bd.get('mode_fog_chance', 0.3) * 100)}%, "
+        f"σ тумана {bd.get('fog_sigma_min')}-{bd.get('fog_sigma_max')} мин, "
+        f"Царь: {int(bd.get('mode_king_chance', 0.2) * 100)}%, "
+        f"Обычный: {int((1 - bd.get('mode_fog_chance', 0.3) - bd.get('mode_king_chance', 0.2)) * 100)}%, "
         f"king countdown {bd.get('king_countdown_min')}-{bd.get('king_countdown_max')} мин.\n"
         f"Страховка: {holder}\n"
         f"Установил {bd['author']} в {bd['config_set_time']}"

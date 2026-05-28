@@ -15,6 +15,8 @@ DEFAULT_DAILY_STATE = {
     "bet_multiplier": 1,
     "chat_id": None,
     "fog_sigma": 0,
+    "fog_center_minutes": 0,
+    "fog_center": "00:00",
     "display_delta": 0,
     "revealed": False,
     "king_started": False,

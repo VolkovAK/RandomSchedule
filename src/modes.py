@@ -33,8 +33,8 @@ def format_bet_suffix(multiplier: int) -> str:
 
 
 def roll_mode(bot_data: dict) -> str:
-    king_chance = bot_data.get("mode_king_chance", 0.05)
-    fog_chance = bot_data.get("mode_fog_chance", 0.10)
+    king_chance = bot_data.get("mode_king_chance", 0.20)
+    fog_chance = bot_data.get("mode_fog_chance", 0.30)
     r = random.random()
     if r < king_chance:
         return "king"
@@ -54,14 +54,30 @@ def roll_exact_time_minutes(bot_data: dict) -> int:
     return rand_time
 
 
+def roll_fog_sigma(bot_data: dict) -> int:
+    fog_lo = bot_data.get("fog_sigma_min", 10)
+    fog_hi = bot_data.get("fog_sigma_max", 25)
+    return random.randint(fog_lo, max(fog_lo, fog_hi))
+
+
+def roll_fog_reveal_minutes(center_minutes: int, fog_sigma: int, bot_data: dict) -> int:
+    """Фактическое время: gauss(центр, fog_sigma), без обрезки по ±2σ."""
+    t = int(random.gauss(center_minutes, fog_sigma))
+    if t < bot_data["from"]:
+        t = bot_data["from"]
+    if t > bot_data["to"]:
+        t = bot_data["to"]
+    return t
+
+
 def target_date_from(sent_date: str) -> str:
     d = datetime.strptime(sent_date, "%Y-%m-%d").date()
     return str(d + timedelta(days=1))
 
 
-def build_fog_display(exact_minutes: int, display_delta: int) -> str:
-    exact_str = parse_minutes_to_time(exact_minutes)
-    return f"~{exact_str} ± {display_delta} мин"
+def build_fog_display(center_minutes: int, display_delta: int) -> str:
+    center_str = parse_minutes_to_time(center_minutes)
+    return f"~{center_str} ± {display_delta} мин"
 
 
 def build_announcement_text(
@@ -73,6 +89,7 @@ def build_announcement_text(
     sigma: int,
     exact_minutes: int,
     display_delta: int = 0,
+    fog_center_time: Optional[str] = None,
 ) -> str:
     time_bold = bold_md(display_time if mode != "normal" else exact_time)
 
@@ -87,7 +104,7 @@ def build_announcement_text(
 
     if mode == "fog":
         phrase = random.choice(FOG_ANNOUNCE_PHRASES)
-        approx_str = exact_time
+        approx_str = fog_center_time or exact_time
         return apply_phrase(
             phrase,
             {"APPROX": bold_md(approx_str), "DELTA": bold_md(str(display_delta))},
@@ -105,39 +122,17 @@ def build_announcement_text(
 
 def build_solo_announcement_text(
     solo_player: str,
-    mode: str,
     exact_time: str,
-    display_time: str,
     is_repeat: bool,
     mean: int,
     sigma: int,
     exact_minutes: int,
-    display_delta: int = 0,
 ) -> str:
-    time_display = display_time if mode != "normal" else exact_time
-    time_bold = bold_md(time_display)
+    time_bold = bold_md(exact_time)
 
     if is_repeat:
         phrase = random.choice(SOLO_REPEAT_PHRASES)
         return apply_phrase(phrase, {"PLAYER": bold_md(solo_player), "TIME": time_bold})
-
-    if mode in ("fog", "king"):
-        body = build_announcement_text(
-            mode=mode,
-            exact_time=exact_time,
-            display_time=display_time,
-            is_repeat=False,
-            mean=mean,
-            sigma=sigma,
-            exact_minutes=exact_minutes,
-            display_delta=display_delta,
-        )
-        phrase = random.choice(SOLO_ANNOUNCE_PHRASES)
-        solo_line = apply_phrase(
-            phrase,
-            {"PLAYER": bold_md(solo_player), "TIME": time_bold},
-        )
-        return f"{solo_line}\n\n{body}"
 
     phrase = random.choice(SOLO_ANNOUNCE_PHRASES)
     text = apply_phrase(
