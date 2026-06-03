@@ -9,6 +9,7 @@ services:
       - ./config.yaml:/app/config.yaml
     environment:
       PYTHONUNBUFFERED: 1
+      TZ: Europe/Moscow
     secrets:
       - tg_key
 

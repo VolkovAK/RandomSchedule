@@ -2,6 +2,8 @@ import random
 import secrets
 import string
 from datetime import datetime, timedelta
+
+from timeutil import at_time, parse_iso
 from typing import Optional
 
 from phrases import (
@@ -176,17 +178,14 @@ def get_solo_checkin_deadline(state: dict) -> Optional[datetime]:
     if not target_date:
         return None
 
-    day = datetime.strptime(target_date, "%Y-%m-%d").date()
     mode = state.get("mode", "normal")
 
     if mode == "king":
         if not state.get("king_started") or not state.get("king_deadline_iso"):
             return None
-        return datetime.fromisoformat(state["king_deadline_iso"])
+        return parse_iso(state["king_deadline_iso"])
 
-    exact_time = state.get("exact_time", "00:00")
-    hours, minutes = map(int, exact_time.split(":"))
-    return datetime.combine(day, datetime.min.time()).replace(hour=hours, minute=minutes)
+    return at_time(target_date, state.get("exact_time", "00:00"))
 
 
 def resolve_user_nickname(user) -> Optional[str]:

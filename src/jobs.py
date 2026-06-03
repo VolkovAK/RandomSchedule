@@ -1,8 +1,9 @@
 import random
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from phrases import FOG_REVEAL_PHRASES, KING_DEADLINE_PHRASES
 from state import save_daily_state, update_daily_state
+from timeutil import at_time, now, parse_iso
 from utils import apply_phrase, bold_md
 
 
@@ -24,7 +25,7 @@ async def reveal_fog_time(context) -> None:
     state = bot_data.get("daily_state", {})
     if state.get("target_date") == data.get("target_date"):
         update_daily_state(bot_data, revealed=True, display_time=exact_time)
-    print(f"{datetime.now()} - fog reveal: {exact_time} -> chat {chat_id}")
+    print(f"{now()} - fog reveal: {exact_time} -> chat {chat_id}")
 
 
 async def king_deadline(context) -> None:
@@ -39,23 +40,19 @@ async def king_deadline(context) -> None:
         text=text,
         parse_mode="MarkdownV2",
     )
-    print(f"{datetime.now()} - king deadline -> chat {chat_id}")
+    print(f"{now()} - king deadline -> chat {chat_id}")
 
 
 def schedule_fog_reveal(job_queue, state: dict) -> None:
     if job_queue is None or state.get("mode") != "fog" or state.get("revealed"):
         return
 
-    target_date = datetime.strptime(state["target_date"], "%Y-%m-%d").date()
-    hours, minutes = map(int, state["exact_time"].split(":"))
-    run_at = datetime.combine(target_date, datetime.min.time()).replace(
-        hour=hours, minute=minutes
-    )
-    delay = max(1, (run_at - datetime.now()).total_seconds())
+    run_at = at_time(state["target_date"], state["exact_time"])
+    when = run_at if run_at > now() else now() + timedelta(seconds=1)
 
     job_queue.run_once(
         reveal_fog_time,
-        delay,
+        when,
         data={
             "chat_id": state["chat_id"],
             "exact_time": state["exact_time"],
@@ -68,13 +65,12 @@ def schedule_fog_reveal(job_queue, state: dict) -> None:
 def schedule_king_deadline(job_queue, chat_id: int, deadline: datetime) -> None:
     if job_queue is None:
         return
-    delay = (deadline - datetime.now()).total_seconds()
-    if delay <= 0:
+    if deadline <= now():
         return
 
     job_queue.run_once(
         king_deadline,
-        delay,
+        deadline,
         data={"chat_id": chat_id},
         name="king_deadline",
     )
@@ -97,14 +93,14 @@ def restore_jobs(application) -> None:
         schedule_fog_reveal(job_queue, state)
 
     if state.get("mode") == "king" and state.get("king_started") and state.get("king_deadline_iso"):
-        deadline = datetime.fromisoformat(state["king_deadline_iso"])
-        if deadline > datetime.now():
+        deadline = parse_iso(state["king_deadline_iso"])
+        if deadline > now():
             schedule_king_deadline(job_queue, state["chat_id"], deadline)
 
     pending_until = state.get("pending_king_until_iso")
     if pending_until:
-        until = datetime.fromisoformat(pending_until)
-        if until <= datetime.now():
+        until = parse_iso(pending_until)
+        if until <= now():
             state["pending_king_user_id"] = None
             state["pending_king_until_iso"] = None
             save_daily_state(state)

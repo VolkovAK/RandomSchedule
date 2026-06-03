@@ -1,14 +1,15 @@
 import os
 import random
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Optional, Tuple
 
 import telegram
 import yaml
 from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import Application, CommandHandler, ContextTypes, Defaults, MessageHandler, filters
 
 from jobs import restore_jobs, schedule_fog_reveal, schedule_king_deadline
+from timeutil import BOT_TZ, now, parse_iso, today_str
 from modes import (
     build_announcement_text,
     build_fog_display,
@@ -115,7 +116,7 @@ def _roll_daily_schedule(
     job_queue,
     solo_player: Optional[str] = None,
 ) -> Tuple[dict, str, int]:
-    current_date = str(datetime.now().date())
+    current_date = today_str()
     state = get_daily_state(bot_data)
     is_repeat = state["sent_date"] == current_date
 
@@ -216,7 +217,7 @@ def _roll_daily_schedule(
 
 
 async def generate_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    current_date = str(datetime.now().date())
+    current_date = today_str()
     state = get_daily_state(context.bot_data)
     activity = get_today_activity(state, current_date)
     if activity in ("solo", "duel"):
@@ -229,7 +230,7 @@ async def generate_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         context.application.job_queue,
         solo_player=None,
     )
-    print(f"{datetime.now()} - {update.effective_user.full_name} [{update.effective_user.id}]: {text}")
+    print(f"{now()} - {update.effective_user.full_name} [{update.effective_user.id}]: {text}")
     await send_md(update, text)
 
 
@@ -242,7 +243,7 @@ async def solo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
         return
 
-    current_date = str(datetime.now().date())
+    current_date = today_str()
     state = get_daily_state(context.bot_data)
     activity = get_today_activity(state, current_date)
 
@@ -266,14 +267,14 @@ async def solo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         context.application.job_queue,
         solo_player=nickname,
     )
-    print(f"{datetime.now()} - solo {nickname} by {update.effective_user.full_name}")
+    print(f"{now()} - solo {nickname} by {update.effective_user.full_name}")
     await send_md(update, text)
 
 
 async def checkin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     bot_data = context.bot_data
     state = get_daily_state(bot_data)
-    today = str(datetime.now().date())
+    today = today_str()
 
     if state.get("schedule_kind") != "solo" or not state.get("solo_player"):
         phrase = random.choice(CHECKIN_NOT_SOLO_PHRASES)
@@ -309,12 +310,12 @@ async def checkin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await update.effective_message.reply_text(text="Дедлайн ещё не назначен.")
         return
 
-    now = datetime.now()
-    if now > deadline:
+    ts = now()
+    if ts > deadline:
         set_expulsion_debuff(bot_data, player)
         phrase = random.choice(CHECKIN_LATE_PHRASES)
         await send_md(update, apply_phrase(phrase, {"PLAYER": player_bold}))
-        print(f"{datetime.now()} - checkin late {player}, expulsion debuff")
+        print(f"{now()} - checkin late {player}, expulsion debuff")
         return
 
     set_insurance_holder(bot_data, player)
@@ -322,7 +323,7 @@ async def checkin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     phrase = random.choice(CHECKIN_SUCCESS_PHRASES)
     await send_md(update, apply_phrase(phrase, {"PLAYER": player_bold}))
-    print(f"{datetime.now()} - checkin {player}, insurance granted")
+    print(f"{now()} - checkin {player}, insurance granted")
 
 
 async def save_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -352,7 +353,7 @@ async def save_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         phrase = random.choice(SAVE_FAIL_PHRASES)
 
     await send_md(update, apply_phrase(phrase, {"HOLDER": holder_bold}))
-    print(f"{datetime.now()} - save by {holder}, success={success}")
+    print(f"{now()} - save by {holder}, success={success}")
 
 
 async def restore_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -368,7 +369,7 @@ async def restore_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await update.effective_message.reply_text(
         text=f"Дебафф «под отчисление» снят с {player}."
     )
-    print(f"{datetime.now()} - restore expulsion debuff for {player}")
+    print(f"{now()} - restore expulsion debuff for {player}")
 
 
 async def duel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -380,7 +381,7 @@ async def duel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     player1 = context.args[0]
     player2 = context.args[1]
-    current_date = str(datetime.now().date())
+    current_date = today_str()
     bot_data = context.bot_data
 
     state = get_daily_state(bot_data)
@@ -428,14 +429,14 @@ async def duel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         {"PLAYER1": bold_md(player1), "PLAYER2": bold_md(player2)},
     )
 
-    print(f"{datetime.now()} - duel: {player1} vs {player2} by {update.effective_user.full_name}")
+    print(f"{now()} - duel: {player1} vs {player2} by {update.effective_user.full_name}")
     await send_md(update, text)
 
 
 async def king_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     bot_data = context.bot_data
     state = get_daily_state(bot_data)
-    today = str(datetime.now().date())
+    today = today_str()
 
     if state["mode"] != "king":
         await update.effective_message.reply_text(text="Сегодня не царь горы. Сначала /time.")
@@ -454,14 +455,14 @@ async def king_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     if state.get("pending_king_user_id") is not None:
         until_iso = state.get("pending_king_until_iso")
-        if until_iso and datetime.fromisoformat(until_iso) > datetime.now():
+        if until_iso and parse_iso(until_iso) > now():
             await update.effective_message.reply_text(text="/king уже у другого. Ждите.")
             return
 
     password = generate_password()
     timeout_sec = bot_data.get("king_media_timeout_sec", 180)
     timeout_min = max(1, timeout_sec // 60)
-    until = datetime.now() + timedelta(seconds=timeout_sec)
+    until = now() + timedelta(seconds=timeout_sec)
 
     update_daily_state(
         bot_data,
@@ -488,7 +489,7 @@ async def king_media_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     bot_data = context.bot_data
     state = get_daily_state(bot_data)
-    today = str(datetime.now().date())
+    today = today_str()
 
     if state["mode"] != "king" or state["target_date"] != today:
         return
@@ -504,7 +505,7 @@ async def king_media_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     until_iso = state.get("pending_king_until_iso")
-    if until_iso and datetime.fromisoformat(until_iso) < datetime.now():
+    if until_iso and parse_iso(until_iso) < now():
         phrase = random.choice(KING_MEDIA_TIMEOUT_PHRASES)
         update_daily_state(
             bot_data,
@@ -522,8 +523,8 @@ async def king_media_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         bot_data.get("king_countdown_min", 5),
         bot_data.get("king_countdown_max", 30),
     )
-    now = datetime.now()
-    deadline = compute_king_deadline(now, countdown, bot_data["from"])
+    ts = now()
+    deadline = compute_king_deadline(ts, countdown, bot_data["from"])
     deadline_str = deadline.strftime("%H:%M")
     winner = update.effective_user.full_name
 
@@ -550,7 +551,7 @@ async def king_media_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             "DEADLINE": bold_md(deadline_str),
         },
     )
-    print(f"{datetime.now()} - king started by {winner}, deadline {deadline_str}")
+    print(f"{now()} - king started by {winner}, deadline {deadline_str}")
     await send_md(update, text)
 
 
@@ -631,7 +632,7 @@ async def reset_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     context.bot_data["duel_player1"] = None
     context.bot_data["duel_player2"] = None
     text = "Время сброшено."
-    print(f"{datetime.now()} - {update.effective_user.full_name} [{update.effective_user.id}]: {text}")
+    print(f"{now()} - {update.effective_user.full_name} [{update.effective_user.id}]: {text}")
     await update.effective_message.reply_text(text=text)
 
 
@@ -652,7 +653,7 @@ async def get_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         f"Под отчисление: {debuff}\n"
         f"Установил {bd['author']} в {bd['config_set_time']}"
     )
-    print(f"{datetime.now()} - {update.effective_user.full_name} [{update.effective_user.id}]: {text}")
+    print(f"{now()} - {update.effective_user.full_name} [{update.effective_user.id}]: {text}")
     await update.effective_message.reply_text(text=text)
 
 
@@ -671,7 +672,7 @@ async def set_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     bot_data["mean"] = parse_time_to_minutes(_mean)
     bot_data["sigma"] = int(_sigma)
     bot_data["author"] = update.effective_user.full_name
-    bot_data["config_set_time"] = str(datetime.now())
+    bot_data["config_set_time"] = str(now())
 
     cancel_named_jobs(context.application.job_queue, ["fog_reveal", "king_deadline"])
     reset_daily_state(bot_data)
@@ -682,7 +683,7 @@ async def set_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         "mean": _mean,
         "sigma": _sigma,
         "author": update.effective_user.full_name,
-        "config_set_time": str(datetime.now()),
+        "config_set_time": str(now()),
     }
     for key, default in DEFAULT_MODE_CONFIG.items():
         cfg[key] = bot_data.get(key, default)
@@ -690,7 +691,7 @@ async def set_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     with open(CONFIG_PATH, "w") as f:
         yaml.safe_dump(cfg, f)
 
-    print(f"{datetime.now()} - {update.effective_user.full_name} [{update.effective_user.id}]: {cfg}")
+    print(f"{now()} - {update.effective_user.full_name} [{update.effective_user.id}]: {cfg}")
     await update.effective_message.reply_text(text="Параметры установлены.")
 
 
@@ -727,7 +728,9 @@ def load_config_into_bot_data(bot_data: dict) -> None:
 
 class Bot:
     def __init__(self, token: str) -> None:
-        self.application = Application.builder().token(token).build()
+        self.application = (
+            Application.builder().token(token).defaults(Defaults(tzinfo=BOT_TZ)).build()
+        )
         load_config_into_bot_data(self.application.bot_data)
 
         state = load_daily_state()
